@@ -1,5 +1,5 @@
 --[[
-	VOID BATTLES - CLIENT ADMIN PANEL
+	HIKA.LUA - CLIENT ADMIN PANEL
 
 	Place this as a LocalScript inside:
 	StarterPlayer > StarterPlayerScripts
@@ -46,7 +46,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- REMOVE AN OLDER COPY
 --------------------------------------------------
 
-local oldGui = playerGui:FindFirstChild("VoidBattlesAdminPanel")
+local oldGui = playerGui:FindFirstChild("HikaLuaPanel")
 
 if oldGui then
 	oldGui:Destroy()
@@ -73,7 +73,7 @@ local STARTUP = {
 	AutoLoadConfig = "Default",
 
 	-- Default panel toggle key.
-	ToggleKey = Enum.KeyCode.RightShift,
+	ToggleKey = Enum.KeyCode.PageUp,
 }
 
 --------------------------------------------------
@@ -84,25 +84,26 @@ local Settings = {
 	VoidMovement = false,
 	TeleportMode = "RANDOM",
 
-	Distance = 1000000,
-	TeleportInterval = 0.10,
-	JitterStrength = 50,
+	-- Defaults recreated from the supplied reference screenshots.
+	Distance = 8580000000,
+	TeleportInterval = 0.000001,
+	JitterStrength = 98,
 
-	PositiveX = 500000,
-	NegativeX = 500000,
+	PositiveX = 7100000000,
+	NegativeX = 3760000000,
 
-	PositiveY = 250000,
-	NegativeY = 500000,
+	PositiveY = 8440000000,
+	NegativeY = 5590000000,
 
-	PositiveZ = 500000,
-	NegativeZ = 500000,
+	PositiveZ = 7870000000,
+	NegativeZ = 3280000000,
 
 	MotionEnabled = true,
-	SpinSpeed = 720,
+	SpinSpeed = 122300,
 
-	XZJitter = 87,
-	YJitter = 60,
-	SpreadDistance = 159,
+	XZJitter = 79200,
+	YJitter = 41700,
+	SpreadDistance = 83640,
 }
 
 --------------------------------------------------
@@ -115,25 +116,25 @@ local BUILT_IN_CONFIGS = {
 	Default = {
 		TeleportMode = "RANDOM",
 
-		Distance = 1000000,
-		TeleportInterval = 0.10,
-		JitterStrength = 50,
+		Distance = 8580000000,
+		TeleportInterval = 0.000001,
+		JitterStrength = 98,
 
-		PositiveX = 500000,
-		NegativeX = 500000,
+		PositiveX = 7100000000,
+		NegativeX = 3760000000,
 
-		PositiveY = 250000,
-		NegativeY = 500000,
+		PositiveY = 8440000000,
+		NegativeY = 5590000000,
 
-		PositiveZ = 500000,
-		NegativeZ = 500000,
+		PositiveZ = 7870000000,
+		NegativeZ = 3280000000,
 
 		MotionEnabled = true,
-		SpinSpeed = 720,
+		SpinSpeed = 122300,
 
-		XZJitter = 87,
-		YJitter = 60,
-		SpreadDistance = 159,
+		XZJitter = 79200,
+		YJitter = 41700,
+		SpreadDistance = 83640,
 	},
 
 	Maximum = {
@@ -197,7 +198,8 @@ local character
 local humanoid
 local rootPart
 
-local movementThread
+local movementConnection
+local movementAccumulator = 0
 local spinConnection
 
 local originalCFrame
@@ -210,6 +212,10 @@ local currentSpin = Vector3.zero
 local panelVisible = not STARTUP.SilentLoad
 local currentToggleKey = STARTUP.ToggleKey
 local waitingForToggleKey = false
+
+-- Separate keybind for Void Movement. Unknown means unassigned.
+local currentVoidKey = Enum.KeyCode.Unknown
+local waitingForVoidKey = false
 
 local savedMouseBehavior
 local savedMouseIconEnabled
@@ -533,41 +539,55 @@ end
 
 local function stopMovementLoop()
 	Settings.VoidMovement = false
+	movementAccumulator = 0
 
-	if movementThread then
-		task.cancel(movementThread)
-		movementThread = nil
+	if movementConnection then
+		movementConnection:Disconnect()
+		movementConnection = nil
 	end
 
 	if humanoid and humanoid.Health > 0 then
-		humanoid:ChangeState(
-			Enum.HumanoidStateType.GettingUp
-		)
+		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 	end
 end
 
 local function startMovementLoop()
-	if movementThread then
-		task.cancel(movementThread)
-		movementThread = nil
+	if movementConnection then
+		movementConnection:Disconnect()
+		movementConnection = nil
 	end
 
 	Settings.VoidMovement = true
+	movementAccumulator = 0
 
 	if rootPart then
 		originalCFrame = rootPart.CFrame
 	end
 
-	movementThread = task.spawn(function()
-		while Settings.VoidMovement do
-			teleportIntoVoid()
+	-- Heartbeat is the fastest reliable Roblox scheduler. An interval of
+	-- 0.000001 therefore means "every available simulation frame".
+	movementConnection = RunService.Heartbeat:Connect(function(deltaTime)
+		if not Settings.VoidMovement then
+			return
+		end
 
-			task.wait(
-				math.max(
-					Settings.TeleportInterval,
-					0.03
-				)
-			)
+		if not character or not rootPart or not humanoid or humanoid.Health <= 0 then
+			return
+		end
+
+		local interval = math.max(Settings.TeleportInterval, 0.000001)
+
+		if interval <= deltaTime then
+			teleportIntoVoid()
+			movementAccumulator = 0
+			return
+		end
+
+		movementAccumulator += deltaTime
+
+		if movementAccumulator >= interval then
+			movementAccumulator %= interval
+			teleportIntoVoid()
 		end
 	end)
 end
@@ -621,27 +641,29 @@ spinConnection = RunService.RenderStepped:Connect(
 --------------------------------------------------
 
 local colours = {
-	Background = Color3.fromRGB(8, 11, 17),
-	Topbar = Color3.fromRGB(12, 16, 24),
-	Sidebar = Color3.fromRGB(10, 14, 21),
+	Background = Color3.fromRGB(17, 8, 15),
+	Topbar = Color3.fromRGB(31, 10, 24),
+	Sidebar = Color3.fromRGB(22, 9, 18),
 
-	Card = Color3.fromRGB(16, 21, 31),
-	CardSecondary = Color3.fromRGB(24, 30, 43),
+	Card = Color3.fromRGB(35, 13, 28),
+	CardSecondary = Color3.fromRGB(53, 18, 42),
 
-	Border = Color3.fromRGB(40, 49, 66),
+	Border = Color3.fromRGB(224, 93, 165),
+	Grid = Color3.fromRGB(94, 34, 72),
 
-	Accent = Color3.fromRGB(78, 121, 255),
-	AccentDark = Color3.fromRGB(50, 78, 165),
+	Accent = Color3.fromRGB(255, 116, 190),
+	AccentBright = Color3.fromRGB(255, 174, 219),
+	AccentDark = Color3.fromRGB(165, 46, 112),
 
-	Text = Color3.fromRGB(235, 240, 250),
-	SecondaryText = Color3.fromRGB(144, 157, 183),
-	DarkText = Color3.fromRGB(92, 105, 132),
+	Text = Color3.fromRGB(255, 234, 247),
+	SecondaryText = Color3.fromRGB(232, 168, 207),
+	DarkText = Color3.fromRGB(174, 86, 137),
 
-	ToggleOff = Color3.fromRGB(48, 57, 73),
-	White = Color3.fromRGB(240, 243, 250),
+	ToggleOff = Color3.fromRGB(76, 31, 61),
+	White = Color3.fromRGB(255, 241, 249),
 
-	Success = Color3.fromRGB(128, 232, 167),
-	Danger = Color3.fromRGB(255, 169, 180),
+	Success = Color3.fromRGB(255, 139, 201),
+	Danger = Color3.fromRGB(255, 103, 150),
 }
 
 --------------------------------------------------
@@ -650,7 +672,8 @@ local colours = {
 
 local function addCorner(object, radius)
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, radius)
+	-- Industrial/robotic design: almost square, never heavily rounded.
+	corner.CornerRadius = UDim.new(0, math.min(radius or 0, 2))
 	corner.Parent = object
 
 	return corner
@@ -664,7 +687,7 @@ local function addStroke(
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = colour or colours.Border
 	stroke.Transparency = transparency or 0
-	stroke.Thickness = 1
+	stroke.Thickness = 1.35
 	stroke.Parent = object
 
 	return stroke
@@ -682,8 +705,8 @@ local function createLabel(
 	label.BackgroundTransparency = 1
 	label.Text = text
 	label.TextColor3 = colours.Text
-	label.Font = Enum.Font.GothamMedium
-	label.TextSize = 13
+	label.Font = Enum.Font.RobotoMono
+	label.TextSize = 12
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Parent = parent
 
@@ -701,9 +724,9 @@ local function createButton(
 	button.Position = position
 	button.BackgroundColor3 = colours.CardSecondary
 	button.BorderSizePixel = 0
-	button.Text = text
+	button.Text = string.upper(text)
 	button.TextColor3 = colours.Text
-	button.Font = Enum.Font.GothamBold
+	button.Font = Enum.Font.RobotoMono
 	button.TextSize = 10
 	button.AutoButtonColor = false
 	button.Parent = parent
@@ -736,7 +759,7 @@ local function createCard(
 
 	titleLabel.TextColor3 = colours.DarkText
 	titleLabel.TextSize = 10
-	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.Font = Enum.Font.RobotoMono
 
 	return card
 end
@@ -746,7 +769,7 @@ end
 --------------------------------------------------
 
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "VoidBattlesAdminPanel"
+screenGui.Name = "hika.lua"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -777,8 +800,8 @@ mouseUnlocker.Parent = screenGui
 
 local main = Instance.new("Frame")
 main.Name = "Main"
-main.Size = UDim2.fromOffset(920, 580)
-main.Position = UDim2.new(0.5, -460, 0.5, -290)
+main.Size = UDim2.fromOffset(940, 590)
+main.Position = UDim2.new(0.5, -470, 0.5, -295)
 main.BackgroundColor3 = colours.Background
 main.BorderSizePixel = 0
 main.ClipsDescendants = true
@@ -786,8 +809,26 @@ main.Visible = panelVisible
 main.ZIndex = 2
 main.Parent = screenGui
 
-addCorner(main, 12)
-addStroke(main, colours.Border, 0.15)
+addCorner(main, 2)
+addStroke(main, colours.Border, 0.05)
+
+local accentRail = Instance.new("Frame")
+accentRail.Name = "AccentRail"
+accentRail.Size = UDim2.new(1, 0, 0, 2)
+accentRail.Position = UDim2.fromOffset(0, 48)
+accentRail.BackgroundColor3 = colours.Accent
+accentRail.BorderSizePixel = 0
+accentRail.ZIndex = 20
+accentRail.Parent = main
+
+local leftRail = Instance.new("Frame")
+leftRail.Name = "LeftRail"
+leftRail.Size = UDim2.new(0, 2, 1, -48)
+leftRail.Position = UDim2.fromOffset(156, 48)
+leftRail.BackgroundColor3 = colours.AccentDark
+leftRail.BorderSizePixel = 0
+leftRail.ZIndex = 20
+leftRail.Parent = main
 
 --------------------------------------------------
 -- TOP BAR
@@ -795,26 +836,41 @@ addStroke(main, colours.Border, 0.15)
 
 local topBar = Instance.new("Frame")
 topBar.Name = "TopBar"
-topBar.Size = UDim2.new(1, 0, 0, 54)
+topBar.Size = UDim2.new(1, 0, 0, 48)
 topBar.BackgroundColor3 = colours.Topbar
 topBar.BorderSizePixel = 0
 topBar.ZIndex = 3
 topBar.Parent = main
 
+local buildLabel = Instance.new("TextLabel")
+buildLabel.Size = UDim2.fromOffset(230, 20)
+buildLabel.Position = UDim2.new(1, -330, 0, 14)
+buildLabel.BackgroundTransparency = 1
+buildLabel.Text = "CLIENT MODULE // VOID CONTROL"
+buildLabel.TextColor3 = colours.DarkText
+buildLabel.Font = Enum.Font.RobotoMono
+buildLabel.TextSize = 10
+buildLabel.TextXAlignment = Enum.TextXAlignment.Right
+buildLabel.ZIndex = 4
+buildLabel.Parent = topBar
+
 local title = createLabel(
 	topBar,
-	"Admin Panel",
+	"hika.lua",
 	UDim2.new(0, 180, 1, 0),
 	UDim2.fromOffset(18, 0)
 )
 
-title.TextSize = 18
-title.Font = Enum.Font.GothamBold
+title.TextSize = 17
+title.Font = Enum.Font.RobotoMono
+title.TextColor3 = colours.AccentBright
+title.TextStrokeColor3 = colours.AccentDark
+title.TextStrokeTransparency = 0.72
 title.ZIndex = 4
 
 local gameName = createLabel(
 	topBar,
-	"Void Battles",
+	"",
 	UDim2.new(0, 180, 1, 0),
 	UDim2.fromOffset(148, 0)
 )
@@ -827,7 +883,7 @@ local minimiseButton = createButton(
 	topBar,
 	"—",
 	UDim2.fromOffset(34, 30),
-	UDim2.new(1, -78, 0, 12)
+	UDim2.new(1, -78, 0, 8)
 )
 
 minimiseButton.TextSize = 17
@@ -837,11 +893,11 @@ local closeButton = createButton(
 	topBar,
 	"×",
 	UDim2.fromOffset(34, 30),
-	UDim2.new(1, -40, 0, 12)
+	UDim2.new(1, -40, 0, 8)
 )
 
 closeButton.BackgroundColor3 =
-	Color3.fromRGB(53, 25, 31)
+	Color3.fromRGB(73, 20, 45)
 
 closeButton.TextColor3 = colours.Danger
 closeButton.TextSize = 18
@@ -852,14 +908,14 @@ closeButton.ZIndex = 5
 --------------------------------------------------
 
 local body = Instance.new("Frame")
-body.Size = UDim2.new(1, 0, 1, -54)
-body.Position = UDim2.fromOffset(0, 54)
+body.Size = UDim2.new(1, 0, 1, -48)
+body.Position = UDim2.fromOffset(0, 48)
 body.BackgroundTransparency = 1
 body.ZIndex = 3
 body.Parent = main
 
 local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 172, 1, 0)
+sidebar.Size = UDim2.new(0, 156, 1, 0)
 sidebar.BackgroundColor3 = colours.Sidebar
 sidebar.BorderSizePixel = 0
 sidebar.ZIndex = 3
@@ -867,25 +923,25 @@ sidebar.Parent = body
 
 local sidebarTitle = createLabel(
 	sidebar,
-	"VOID BATTLES",
+	"",
 	UDim2.new(1, -24, 0, 30),
 	UDim2.fromOffset(12, 12)
 )
 
 sidebarTitle.TextColor3 = colours.DarkText
 sidebarTitle.TextSize = 10
-sidebarTitle.Font = Enum.Font.GothamBold
+sidebarTitle.Font = Enum.Font.RobotoMono
 sidebarTitle.ZIndex = 4
 
 local voidTab = createButton(
 	sidebar,
 	"   Void",
-	UDim2.new(1, -20, 0, 40),
-	UDim2.fromOffset(10, 45)
+	UDim2.new(1, -16, 0, 38),
+	UDim2.fromOffset(8, 16)
 )
 
 voidTab.BackgroundColor3 =
-	Color3.fromRGB(25, 32, 47)
+	colours.CardSecondary
 
 voidTab.TextSize = 13
 voidTab.TextXAlignment =
@@ -896,8 +952,8 @@ voidTab.ZIndex = 4
 local settingsTab = createButton(
 	sidebar,
 	"   Settings",
-	UDim2.new(1, -20, 0, 40),
-	UDim2.fromOffset(10, 91)
+	UDim2.new(1, -16, 0, 38),
+	UDim2.fromOffset(8, 62)
 )
 
 settingsTab.BackgroundColor3 = colours.Card
@@ -911,8 +967,8 @@ settingsTab.ZIndex = 4
 local statusLabel = createLabel(
 	sidebar,
 	"Status: Disabled",
-	UDim2.new(1, -20, 0, 42),
-	UDim2.new(0, 10, 1, -54)
+	UDim2.new(1, -16, 0, 38),
+	UDim2.new(0, 8, 1, -50)
 )
 
 statusLabel.BackgroundTransparency = 0
@@ -983,7 +1039,7 @@ local function showNotification(
 		UDim2.fromOffset(12, 9)
 	)
 
-	notificationTitle.Font = Enum.Font.GothamBold
+	notificationTitle.Font = Enum.Font.RobotoMono
 	notificationTitle.TextSize = 13
 	notificationTitle.TextTransparency = 1
 	notificationTitle.ZIndex = 102
@@ -1158,8 +1214,8 @@ end
 local function createPage(name)
 	local page = Instance.new("ScrollingFrame")
 	page.Name = name
-	page.Size = UDim2.new(1, -172, 1, 0)
-	page.Position = UDim2.fromOffset(172, 0)
+	page.Size = UDim2.new(1, -156, 1, 0)
+	page.Position = UDim2.fromOffset(156, 0)
 	page.BackgroundTransparency = 1
 	page.BorderSizePixel = 0
 	page.ScrollBarThickness = 4
@@ -1341,7 +1397,7 @@ local function createSlider(
 		UDim2.fromOffset(14, yPosition + 25)
 
 	track.BackgroundColor3 =
-		Color3.fromRGB(44, 53, 69)
+		Color3.fromRGB(72, 35, 61)
 
 	track.BorderSizePixel = 0
 	track.ZIndex = 6
@@ -1532,7 +1588,7 @@ teleportCard.ZIndex = 5
 
 controls.VoidMovement = createToggle(
 	teleportCard,
-	"Void Movement",
+	"Void Spam",
 	38,
 	Settings.VoidMovement,
 	function(enabled)
@@ -1549,6 +1605,21 @@ controls.VoidMovement = createToggle(
 		end
 	end
 )
+
+local voidKeyButton = createButton(
+	teleportCard,
+	"KEY: NONE",
+	UDim2.fromOffset(96, 26),
+	UDim2.new(1, -168, 0, 39)
+)
+voidKeyButton.TextColor3 = colours.SecondaryText
+voidKeyButton.ZIndex = 7
+
+voidKeyButton.MouseButton1Click:Connect(function()
+	waitingForVoidKey = true
+	voidKeyButton.Text = "PRESS KEY..."
+	voidKeyButton.TextColor3 = colours.Accent
+end)
 
 local modeLabel = createLabel(
 	teleportCard,
@@ -1590,7 +1661,7 @@ controls.Distance = createSlider(
 	"Distance",
 	108,
 	1000,
-	1000000000,
+	10000000000,
 	Settings.Distance,
 	1000,
 	" studs",
@@ -1604,12 +1675,12 @@ controls.TeleportInterval = createSlider(
 	teleportCard,
 	"Teleport Interval",
 	148,
-	0.03,
+	0.000001,
 	2,
 	Settings.TeleportInterval,
-	0.01,
+	0.000001,
 	"s",
-	2,
+	6,
 	function(value)
 		Settings.TeleportInterval = value
 	end
@@ -1678,7 +1749,7 @@ for index, information in ipairs(directionRows) do
 		information.Label,
 		36 + ((index - 1) * 48),
 		0,
-		1000000000,
+		10000000000,
 		Settings[key],
 		1000,
 		"",
@@ -1717,7 +1788,7 @@ controls.SpinSpeed = createSlider(
 	"Spin Speed",
 	80,
 	0,
-	20000,
+	200000,
 	Settings.SpinSpeed,
 	10,
 	" deg/s",
@@ -1732,7 +1803,7 @@ controls.XZJitter = createSlider(
 	"XZ Jitter",
 	125,
 	0,
-	10000,
+	100000,
 	Settings.XZJitter,
 	1,
 	"",
@@ -1747,7 +1818,7 @@ controls.YJitter = createSlider(
 	"Y Jitter",
 	170,
 	0,
-	10000,
+	100000,
 	Settings.YJitter,
 	1,
 	"",
@@ -1762,7 +1833,7 @@ controls.SpreadDistance = createSlider(
 	"Spread Distance",
 	215,
 	0,
-	100000,
+	1000000,
 	Settings.SpreadDistance,
 	1,
 	" studs",
@@ -1820,7 +1891,7 @@ local returnButton = createButton(
 )
 
 returnButton.BackgroundColor3 =
-	Color3.fromRGB(25, 32, 47)
+	colours.CardSecondary
 
 returnButton.LayoutOrder = 3
 returnButton.ZIndex = 5
@@ -1952,8 +2023,8 @@ local autoExecuteToggle = createToggle(
 		showNotification(
 			"Auto Execute",
 			enabled
-				and "Void Movement will automatically start when this script next loads during this session."
-				or "Automatic Void Movement has been disabled.",
+				and "Void Spam will automatically start when this script next loads during this session."
+				or "Automatic Void Spam has been disabled.",
 			4
 		)
 	end
@@ -2063,7 +2134,7 @@ configNameBox.PlaceholderColor3 =
 
 configNameBox.Text = ""
 configNameBox.TextColor3 = colours.Text
-configNameBox.Font = Enum.Font.GothamMedium
+configNameBox.Font = Enum.Font.RobotoMono
 configNameBox.TextSize = 12
 configNameBox.ClearTextOnFocus = false
 configNameBox.ZIndex = 6
@@ -2160,7 +2231,7 @@ local deleteConfigButton = createButton(
 )
 
 deleteConfigButton.BackgroundColor3 =
-	Color3.fromRGB(54, 25, 31)
+	Color3.fromRGB(73, 20, 45)
 
 deleteConfigButton.TextColor3 = colours.Danger
 deleteConfigButton.ZIndex = 6
@@ -2213,20 +2284,75 @@ end
 
 rebuildConfigNames()
 
-cycleConfigButton.MouseButton1Click:Connect(function()
+local configDropdown = Instance.new("Frame")
+configDropdown.Name = "ConfigDropdown"
+configDropdown.Size = UDim2.new(1, -28, 0, 0)
+configDropdown.Position = UDim2.fromOffset(14, 229)
+configDropdown.BackgroundColor3 = colours.CardSecondary
+configDropdown.BorderSizePixel = 0
+configDropdown.ClipsDescendants = true
+configDropdown.Visible = false
+configDropdown.ZIndex = 20
+configDropdown.Parent = configCard
+addCorner(configDropdown, 7)
+addStroke(configDropdown, colours.Border, 0.35)
+
+local dropdownLayout = Instance.new("UIListLayout")
+dropdownLayout.SortOrder = Enum.SortOrder.LayoutOrder
+dropdownLayout.Parent = configDropdown
+
+local function closeConfigDropdown()
+	configDropdown.Visible = false
+	configDropdown.Size = UDim2.new(1, -28, 0, 0)
+end
+
+local function openConfigDropdown()
 	rebuildConfigNames()
+
+	for _, child in ipairs(configDropdown:GetChildren()) do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
 
 	if #configNames == 0 then
 		return
 	end
 
-	configIndex += 1
+	for _, configName in ipairs(configNames) do
+		local option = createButton(
+			configDropdown,
+			configName,
+			UDim2.new(1, 0, 0, 32),
+			UDim2.fromOffset(0, 0)
+		)
+		option.TextXAlignment = Enum.TextXAlignment.Left
+		option.TextColor3 = colours.SecondaryText
+		option.ZIndex = 21
 
-	if configIndex > #configNames then
-		configIndex = 1
+		option.MouseButton1Click:Connect(function()
+			for index, name in ipairs(configNames) do
+				if name == configName then
+					configIndex = index
+					break
+				end
+			end
+			rebuildConfigNames()
+			closeConfigDropdown()
+		end)
 	end
 
-	rebuildConfigNames()
+	local height = math.min(#configNames * 32, 160)
+	configDropdown.Size = UDim2.new(1, -28, 0, height)
+	configDropdown.Visible = true
+end
+
+cycleConfigButton.MouseButton1Click:Connect(function()
+	if configDropdown.Visible then
+		closeConfigDropdown()
+	else
+		openConfigDropdown()
+	end
 end)
 
 saveConfigButton.MouseButton1Click:Connect(function()
@@ -2405,7 +2531,7 @@ local function showVoidPage()
 	settingsPage.Visible = false
 
 	voidTab.BackgroundColor3 =
-		Color3.fromRGB(25, 32, 47)
+		colours.CardSecondary
 
 	voidTab.TextColor3 = colours.Text
 
@@ -2427,7 +2553,7 @@ local function showSettingsPage()
 		colours.SecondaryText
 
 	settingsTab.BackgroundColor3 =
-		Color3.fromRGB(25, 32, 47)
+		colours.CardSecondary
 
 	settingsTab.TextColor3 = colours.Text
 end
@@ -2541,10 +2667,10 @@ minimiseButton.MouseButton1Click:Connect(function()
 	body.Visible = not minimised
 
 	if minimised then
-		main.Size = UDim2.fromOffset(920, 54)
+		main.Size = UDim2.fromOffset(940, 48)
 		minimiseButton.Text = "+"
 	else
-		main.Size = UDim2.fromOffset(920, 580)
+		main.Size = UDim2.fromOffset(940, 590)
 		minimiseButton.Text = "—"
 	end
 end)
@@ -2561,6 +2687,19 @@ UserInputService.InputBegan:Connect(function(
 	input,
 	processed
 )
+	if waitingForVoidKey then
+		if input.UserInputType == Enum.UserInputType.Keyboard
+			and input.KeyCode ~= Enum.KeyCode.Unknown
+		then
+			currentVoidKey = input.KeyCode
+			waitingForVoidKey = false
+			voidKeyButton.Text = "KEY: " .. currentVoidKey.Name
+			voidKeyButton.TextColor3 = colours.SecondaryText
+			showNotification("Void Keybind", "Void Spam key set to " .. currentVoidKey.Name .. ".", 3)
+		end
+		return
+	end
+
 	if waitingForToggleKey then
 		if input.UserInputType
 			== Enum.UserInputType.Keyboard
@@ -2590,6 +2729,14 @@ UserInputService.InputBegan:Connect(function(
 	end
 
 	if processed then
+		return
+	end
+
+	if currentVoidKey ~= Enum.KeyCode.Unknown
+		and input.KeyCode == currentVoidKey
+	then
+		local newState = not Settings.VoidMovement
+		controls.VoidMovement.Set(newState, true)
 		return
 	end
 
@@ -2649,7 +2796,7 @@ task.defer(function()
 				.. " to open the panel."
 		else
 			message =
-				"Admin Panel loaded."
+				"hika.lua loaded."
 				.. loadedConfigText
 				.. " Press "
 				.. currentToggleKey.Name
@@ -2657,7 +2804,7 @@ task.defer(function()
 		end
 
 		showNotification(
-			"Admin Panel Loaded",
+			"hika.lua Loaded",
 			message,
 			5
 		)
